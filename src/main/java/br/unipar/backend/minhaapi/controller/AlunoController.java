@@ -1,12 +1,12 @@
 package br.unipar.backend.minhaapi.controller;
 
 import br.unipar.backend.minhaapi.model.Aluno;
+import br.unipar.backend.minhaapi.repository.AlunoRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.text.Normalizer;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -14,92 +14,97 @@ import java.util.Locale;
 @RequestMapping("/alunos")
 public class AlunoController {
 
-    private final List<Aluno> alunos = new ArrayList<>();
+    private final AlunoRepository alunoRepository;
 
-    private int proximoId = 1;
+    public AlunoController(AlunoRepository alunoRepository) {
+        this.alunoRepository = alunoRepository;
+    }
 
     @GetMapping
     public ResponseEntity<List<Aluno>> listarAlunos(
             @RequestParam(required = false) String nome,
             @RequestParam(required = false) String curso,
             @RequestParam(required = false) String cidade) {
-        List<Aluno> resultado = new ArrayList<>();
 
-        for (Aluno aluno : alunos) {
-            // O aluno precisa atender a todos os filtros informados.
-            if (corresponde(aluno.getNome(), nome)
-                    && corresponde(aluno.getCurso(), curso)
-                    && corresponde(aluno.getCidade(), cidade)) {
-                resultado.add(aluno);
-            }
-        }
+        List<Aluno> resultado = alunoRepository.findAll()
+                .stream()
+                .filter(aluno -> corresponde(aluno.getNome(), nome))
+                .filter(aluno -> corresponde(aluno.getCurso(), curso))
+                .filter(aluno -> corresponde(aluno.getCidade(), cidade))
+                .toList();
 
         return ResponseEntity.ok(resultado);
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Aluno> buscarAluno(@PathVariable int id) {
+    public ResponseEntity<Aluno> buscarAluno(@PathVariable Long id) {
 
-        for (Aluno aluno : alunos) {
-            if (aluno.getId() == id) {
-                return ResponseEntity.ok(aluno);
-            }
-        }
-
-        return ResponseEntity.notFound().build();
+        return alunoRepository.findById(id)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @PostMapping
     public ResponseEntity<Aluno> cadastrarAluno(@RequestBody Aluno aluno) {
-        // O ID vem do contador, mesmo que o cliente envie um ID no JSON.
-        aluno.setId(proximoId);
-        proximoId++;
-        alunos.add(aluno);
 
-        return ResponseEntity.status(HttpStatus.CREATED).body(aluno);
+        // O ID será gerado automaticamente pelo banco.
+        Aluno alunoSalvo = alunoRepository.save(aluno);
+
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(alunoSalvo);
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Aluno> atualizarAluno(@PathVariable int id,
-                                               @RequestBody Aluno novosDados) {
-        for (Aluno aluno : alunos) {
-            if (aluno.getId() == id) {
-                aluno.setNome(novosDados.getNome());
-                aluno.setIdade(novosDados.getIdade());
-                aluno.setCurso(novosDados.getCurso());
-                aluno.setCidade(novosDados.getCidade());
-                return ResponseEntity.ok(aluno);
-            }
-        }
+    public ResponseEntity<Aluno> atualizarAluno(
+            @PathVariable Long id,
+            @RequestBody Aluno novosDados) {
 
-        return ResponseEntity.notFound().build();
+        return alunoRepository.findById(id)
+                .map(aluno -> {
+
+                    aluno.setNome(novosDados.getNome());
+                    aluno.setIdade(novosDados.getIdade());
+                    aluno.setCurso(novosDados.getCurso());
+                    aluno.setCidade(novosDados.getCidade());
+
+                    Aluno alunoAtualizado = alunoRepository.save(aluno);
+
+                    return ResponseEntity.ok(alunoAtualizado);
+                })
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<String> excluirAluno(@PathVariable int id) {
-        for (int i = 0; i < alunos.size(); i++) {
-            // A busca usa o ID; a posicao serve apenas para remover da lista.
-            if (alunos.get(i).getId() == id) {
-                alunos.remove(i);
-                return ResponseEntity.ok("Aluno " + id + " excluido com sucesso!");
-            }
+    public ResponseEntity<String> excluirAluno(@PathVariable Long id) {
+
+        if (!alunoRepository.existsById(id)) {
+            return ResponseEntity.notFound().build();
         }
 
-        return ResponseEntity.notFound().build();
+        alunoRepository.deleteById(id);
+
+        return ResponseEntity.ok(
+                "Aluno " + id + " excluido com sucesso!"
+        );
     }
 
     private boolean corresponde(String valor, String filtro) {
+
         if (filtro == null || filtro.isBlank()) {
             return true;
         }
+
         if (valor == null) {
             return false;
         }
+
         return normalizar(valor).contains(normalizar(filtro));
     }
 
     private String normalizar(String texto) {
-        // Separa e remove os acentos para que "Joao" encontre "João".
+
+        // Remove acentos e transforma em letras minúsculas.
         return Normalizer.normalize(texto, Normalizer.Form.NFD)
                 .replaceAll("\\p{M}", "")
                 .toLowerCase(Locale.ROOT);
